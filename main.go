@@ -8,36 +8,36 @@ import (
 	"strconv"
 )
 
-// генерация символов разделителей
-func makeSeparator(level int, isLast bool, isLastParent bool) string {
-	separator := "───"
-	var result, separatorStart string
-	// если последний элемент в списке
-	if isLast == true {
-		separatorStart = "└"
-	} else {
-		separatorStart = "├"
+// генерация графического символа для текущего элемента
+func makeSymbol(isLast bool) string {
+	if isLast == true { // если элемент последний
+		return "└───"
 	}
-	for i := 0; i < level; i++ {
-		// todo: разобраться как сделать правильные префиксы у закрывающий элементов
-		// последний в уровне; последний в уровне, где родитель последний в своем уровне
-		if (isLastParent || isLast) && i == 0 { // если первый элемент в списке
-			result += "|\t"
-		} else if isLastParent && isLast {
-			result += "\t"
-		} else {
-			result += "│\t"
-		}
+	return "├───"
+}
+
+// генерация символа табуляции для текущего элемента
+func makePrefix(prevPrefix string, isLastParent bool, level int) string {
+	if level == 0 { // если 0 уровень - пустая строка
+		return ""
 	}
-	return result + separatorStart + separator
+	if isLastParent == true { // если родительский элемент последний
+		return prevPrefix + "\t"
+	}
+	return prevPrefix + "│\t"
 }
 
 // генерация имени файла
-func makeFileName(fi os.FileInfo, postfix string) string {
+func makeFileName(fi os.FileInfo, postfix string, prefix string, symbol string) string {
 	if fi.Size() > 0 { // если размер ненулевой
-		return fi.Name() + " (" + strconv.Itoa(int(fi.Size())) + postfix + ")"
+		return prefix + symbol + fi.Name() + " (" + strconv.Itoa(int(fi.Size())) + postfix + ")"
 	}
-	return fi.Name() + " (empty)"
+	return prefix + symbol + fi.Name() + " (empty)"
+}
+
+// генерации имени директории
+func makeDirName(fi os.FileInfo, prefix string, symbol string) string {
+	return prefix + symbol + fi.Name()
 }
 
 // сортировка по имени слайса с файловыми данными
@@ -73,32 +73,32 @@ func getOnlyDirs(fileInfos []os.FileInfo) []os.FileInfo {
 }
 
 // рекурсивный метод для работы с папкой
-func currentDirTree(writer io.Writer, path string, printFiles bool, level int) error {
-	dir, err := os.Open(path)
+func currentDirTree(writer io.Writer, path string, printFiles bool, level int, isLastParent bool, prevSeparator string) error {
+	dir, err := os.Open(path) // читаем текущий путь
 	if err != nil {
 		return err
 	}
 	defer dir.Close()
 
-	fileInfos, err := dir.Readdir(-1)
+	fileInfos, err := dir.Readdir(-1) // читаем текущую директорию
 	if err != nil {
 		return err
 	}
 
-	normalized := normalizedFiles(fileInfos, printFiles)
+	normalized := normalizedFiles(fileInfos, printFiles) // нормализация слайса с текущими элементами
+	isLast := false                                      // проверка на последний элемент в слайсе
 	for idx, fi := range normalized {
-		//todo: разобраться с рисованием символов - описать логику
-		lastParent := false
-		if fi.IsDir() && idx == len(normalized)-1 {
-			lastParent = true
+		if idx == len(normalized)-1 { // если элемент последний в текущей слайсе
+			isLast = true
 		}
-		if fi.IsDir() {
-			separator := makeSeparator(level, idx == len(normalized)-1, lastParent)
-			fmt.Fprintln(writer, separator+fi.Name())
-			currentDirTree(writer, path+string(os.PathSeparator)+fi.Name(), printFiles, level+1)
+		prefix := makePrefix(prevSeparator, isLastParent, level)
+		symbol := makeSymbol(isLast)
+		if fi.IsDir() { // если директория
+			fmt.Fprintln(writer, makeDirName(fi, prefix, symbol))
+			currentPath := path + string(os.PathSeparator) + fi.Name() // текущий путь, который передаем дальше рекурсивно
+			currentDirTree(writer, currentPath, printFiles, level+1, isLast, prefix)
 		} else if !fi.IsDir() && printFiles == true {
-			separator := makeSeparator(level, idx == len(normalized)-1, false)
-			fmt.Fprintln(writer, separator+makeFileName(fi, "b"))
+			fmt.Fprintln(writer, makeFileName(fi, "b", prefix, symbol))
 		} else {
 			continue
 		}
@@ -108,7 +108,7 @@ func currentDirTree(writer io.Writer, path string, printFiles bool, level int) e
 
 // точка входа
 func dirTree(writer io.Writer, path string, printFiles bool) error {
-	err := currentDirTree(writer, path, printFiles, 0)
+	err := currentDirTree(writer, path, printFiles, 0, false, "")
 	if err != nil {
 		return err
 	}
